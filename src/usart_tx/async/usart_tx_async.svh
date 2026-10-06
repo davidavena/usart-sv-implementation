@@ -1,34 +1,38 @@
-function automatic void async_tx();
-	case (usart_state)
+function automatic logic async_tx(
+	input logic [7:0] latched_data, 
+	input logic [2:0] bit_index, 
+	input usart_state_t current_state
+);
+	case (current_state)
 		FSM_IDLE: begin
-			usart_tx_o <= STOP_BIT;
+			return STOP_BIT;
 		end
 		FSM_START: begin
-			usart_tx_o <= START_BIT;
+			return START_BIT;
 		end
 		FSM_DATA: begin
-			usart_tx_o <= latched_data_byte[bit_index];
+			return latched_data[bit_index];
 		end
 		FSM_PARITY: begin
-			bit_index <= '0;
 			case (PARITY)
 				EVEN: begin
-					usart_tx_o <= ^latched_data_byte;
+					return ^latched_data;
 				end
 				ODD: begin
-					usart_tx_o <= ~^latched_data_byte;
+					return ~^latched_data;
 				end
 			endcase
 		end
 		FSM_STOP: begin
-			usart_tx_o <= STOP_BIT;
+			return STOP_BIT;
 		end
 	endcase
 endfunction
 
 function automatic usart_state_t async_mode_state_machine(
-	input logic [7:0] bit_index, 
+	input logic [2:0] bit_index, 
 	input [7:0] data_bit_count, 
+	input parity_config_t parity,
 	input usart_state_t current_state, 
 	input logic transmit_flag, 
 	output logic ready_flag, 
@@ -37,7 +41,7 @@ function automatic usart_state_t async_mode_state_machine(
 
 	ready_flag = '0;
 	fast_trigger = '0;
-	
+
 	case (current_state)
 			FSM_IDLE: begin
 				ready_flag = 1'b1;
@@ -54,7 +58,7 @@ function automatic usart_state_t async_mode_state_machine(
 			end
 			FSM_DATA: begin
 				if (bit_index == data_bit_count - 1) begin
-					case (PARITY)
+					case (parity)
 						NONE: begin
 							return FSM_STOP;
 						end
