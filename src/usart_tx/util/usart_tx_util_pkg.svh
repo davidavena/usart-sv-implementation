@@ -1,6 +1,6 @@
-function automatic logic [7:0] bit_index_handler(
-	input logic [7:0] old_bit_index, 
-	input logic [7:0] limit, 
+function automatic logic [2:0] bit_index_handler(
+	input logic [3:0] old_bit_index, 
+	input logic [3:0] limit, 
 	input usart_state_t current_state, 
 	input usart_state_t target_state
 );

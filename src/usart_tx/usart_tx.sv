@@ -3,7 +3,7 @@ import usart_types_pkg::*;
 module usart_tx #(
 	parameter int 				BAUD_RATE 	= 9600,
 	parameter parity_config_t 	PARITY 		= NONE,
-	parameter int				DATA_BIT_COUNT 	= 8,
+	parameter logic [3:0]		DATA_BIT_COUNT 	= 8,
 	parameter usart_clock_polarity_t 	CLOCK_POLARITY = CPOL_0,
 	parameter usart_clock_phase_t		CLOCK_PHASE = CPHA_0,
 	parameter usart_mode_t 		TRANSMITTER_MODE = ASYNCHRONOUS_UART,
@@ -44,7 +44,7 @@ logic sync_clock_tick;
 `include "util/usart_tx_util_pkg.svh"
 `include "async/usart_tx_async.svh"
 `include "util/usart_tx_sync.svh"
-`include "legacy/usart_tx_legacy.svh"
+//`include "legacy/usart_tx_legacy.svh"
 //`include "spi/usart_tx_spi.svh"
 
 timer #(
@@ -82,6 +82,7 @@ always_comb begin
 			next_usart_state = async_mode_state_machine(
 				.bit_index(bit_index),
 				.data_bit_count(DATA_BIT_COUNT),
+				.parity(PARITY),
 				.current_state(usart_state),
 				.transmit_flag(transmit_flag_i),
 				.ready_flag(ready_flag_o),
@@ -89,7 +90,7 @@ always_comb begin
 			);
 		end
 		LEGACY_SYNCHRONOUS: begin
-			legacy_sync_mode_state_machine();
+			//legacy_sync_mode_state_machine();
 		end
 		SPI_MASTER_SYNCHRONOUS: begin
 		end
@@ -113,7 +114,7 @@ always_ff @(posedge clock_i) begin
 			//synchronous_clock_driver();
 			case (TRANSMITTER_MODE)
 				LEGACY_SYNCHRONOUS: begin
-					legacy_sync_usart_branch();
+					//legacy_sync_usart_branch();
 				end
 				SPI_MASTER_SYNCHRONOUS: begin
 				end
@@ -144,7 +145,11 @@ endfunction
 
 function automatic void async_usart_branch();
 	if (!baud_tick && start_fast_trigger != 1'd1) begin
-		async_tx();
+		usart_tx_o <= async_tx(
+			.latched_data(latched_data_byte),
+			.bit_index(bit_index),
+			.current_state(usart_state)
+		);
 	end	else begin
 		usart_state <= state_transition(
 			.new_state(next_usart_state)
@@ -161,7 +166,7 @@ endfunction
 
 function automatic void legacy_sync_usart_branch();
 	if (!sync_clock_tick) begin
-		legacy_synchronous_tx();
+		//legacy_synchronous_tx();
 	end else begin
 		usart_state <= state_transition(next_usart_state);
 		bit_index <= bit_index_handler(
