@@ -21,7 +21,8 @@ usart_tx #(
 	.CLOCK_FREQ(38000000),
     .CLOCK_POLARITY(CPOL_0),
     .CLOCK_PHASE(CPHA_1),
-    .TRANSMITTER_MODE(LEGACY_SYNCHRONOUS)
+    .TRANSMITTER_MODE(ASYNCHRONOUS_UART),
+    .DATA_BIT_COUNT(2)
 ) usart_tx_module (
 	.clock_i(clock_i),
 	.reset_n_i(reset_n_i),
