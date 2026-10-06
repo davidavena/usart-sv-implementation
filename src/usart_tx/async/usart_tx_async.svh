@@ -1,28 +1,28 @@
 function void async_tx();
 	case (usart_state)
 		FSM_IDLE: begin
-			shift_bit_on_tx_o(1'd1);
+			usart_tx_o <= 1'd1;
 		end
 		FSM_START: begin
-			shift_bit_on_tx_o('0);
+			usart_tx_o <= '0;
 		end
 		FSM_DATA: begin
-			shift_bit_on_tx_o(latched_data_byte[bit_index]);
+			usart_tx_o <= latched_data_byte[bit_index];
 		end
 		FSM_PARITY: begin
 			bit_index <= '0;
 			case (PARITY)
 				EVEN: begin
-					shift_bit_on_tx_o(^latched_data_byte);
+					usart_tx_o <= ^latched_data_byte;
 				end
 				ODD: begin
-					shift_bit_on_tx_o(~^latched_data_byte);
+					usart_tx_o <= ~^latched_data_byte;
 				end
 			endcase
 		end
 		FSM_STOP: begin
 			bit_index <= '0;
-			shift_bit_on_tx_o(1'd1);
+			usart_tx_o <= 1'd1;
 		end
 	endcase
 endfunction
