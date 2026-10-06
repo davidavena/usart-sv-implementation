@@ -1,5 +1,8 @@
 package usart_types_pkg;
 
+	localparam logic START_BIT = '0;
+	localparam logic STOP_BIT = 1'd1;
+
 	typedef enum logic [1:0] {
 		NONE,
 		ODD,
