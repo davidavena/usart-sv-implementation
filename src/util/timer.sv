@@ -24,7 +24,7 @@ always_ff @(posedge clock_i) begin
     end else begin
         if (enable_i) begin
             if (override_i) begin
-                counter_logic(target_freq_override_i);
+                counter_logic(MAIN_CLOCK_FREQ / target_freq_override_i);
             end else begin
                 counter_logic(CLOCKS_PER_TICK);
             end
