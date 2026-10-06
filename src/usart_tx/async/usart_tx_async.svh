@@ -1,10 +1,10 @@
-function void async_tx();
+function automatic void async_tx();
 	case (usart_state)
 		FSM_IDLE: begin
-			usart_tx_o <= 1'd1;
+			usart_tx_o <= STOP_BIT;
 		end
 		FSM_START: begin
-			usart_tx_o <= '0;
+			usart_tx_o <= START_BIT;
 		end
 		FSM_DATA: begin
 			usart_tx_o <= latched_data_byte[bit_index];
@@ -21,45 +21,55 @@ function void async_tx();
 			endcase
 		end
 		FSM_STOP: begin
-			bit_index <= '0;
-			usart_tx_o <= 1'd1;
+			usart_tx_o <= STOP_BIT;
 		end
 	endcase
 endfunction
 
-function void async_mode_state_machine();
-	case (usart_state)
+function automatic usart_state_t async_mode_state_machine(
+	input logic [7:0] bit_index, 
+	input [7:0] data_bit_count, 
+	input usart_state_t current_state, 
+	input logic transmit_flag, 
+	output logic ready_flag, 
+	output logic fast_trigger
+);
+
+	ready_flag = '0;
+	fast_trigger = '0;
+	
+	case (current_state)
 			FSM_IDLE: begin
-				ready_flag_o = 1'b1;
-				if (transmit_flag_i == 1'b1) begin
-					start_fast_trigger = 1'b1;
-					ready_flag_o = '0;
-					next_usart_state = FSM_START;
+				ready_flag = 1'b1;
+				if (transmit_flag == 1'b1) begin
+					fast_trigger = 1'b1;
+					ready_flag = '0;
+					return FSM_START;
 				end else begin
-					next_usart_state = FSM_IDLE;
+					return FSM_IDLE;
 				end
 			end
 			FSM_START: begin
-				next_usart_state = FSM_DATA;
+				return FSM_DATA;
 			end
 			FSM_DATA: begin
-				next_usart_state = FSM_DATA;
-				if (bit_index == 3'd7) begin
+				if (bit_index == data_bit_count - 1) begin
 					case (PARITY)
 						NONE: begin
-							next_usart_state = FSM_STOP;
+							return FSM_STOP;
 						end
 						default: begin
-							next_usart_state = FSM_PARITY;
+							return FSM_PARITY;
 						end
 					endcase
 				end
+				return FSM_DATA;
 			end
 			FSM_PARITY: begin
-				next_usart_state = FSM_STOP;
+				return FSM_STOP;
 			end
 			FSM_STOP: begin
-				next_usart_state = FSM_IDLE;
+				return FSM_IDLE;
 			end
 		endcase
 endfunction

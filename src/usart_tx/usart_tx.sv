@@ -3,6 +3,7 @@ import usart_types_pkg::*;
 module usart_tx #(
 	parameter int 				BAUD_RATE 	= 9600,
 	parameter parity_config_t 	PARITY 		= NONE,
+	parameter int				DATA_BIT_COUNT 	= 8,
 	parameter usart_clock_polarity_t 	CLOCK_POLARITY = CPOL_0,
 	parameter usart_clock_phase_t		CLOCK_PHASE = CPHA_0,
 	parameter usart_mode_t 		TRANSMITTER_MODE = ASYNCHRONOUS_UART,
@@ -22,12 +23,6 @@ module usart_tx #(
 	output logic 				ready_flag_o
 );
 
-localparam int 					CLOCKS_PER_BIT = (CLOCK_FREQ / BAUD_RATE) - 1;
-localparam int 					COUNTER_WIDTH = (CLOCKS_PER_BIT <= 1) ? 1 : $clog2(CLOCKS_PER_BIT + 1);
-
-logic [COUNTER_WIDTH - 1:0] 	baud_counter;
-logic [COUNTER_WIDTH - 2:0]	clock_counter;
-
 logic [7:0] latched_data_byte;
 logic [2:0] bit_index;
 logic start_fast_trigger;
@@ -39,25 +34,59 @@ logic previous_usart_tx_clock;
 usart_state_t usart_state;
 usart_state_t next_usart_state;
 
-logic sync_clock_rising_edge;
-logic sync_clock_switched;
+logic sync_clock_override;
 
-`include "async/usart_tx_async.svh"
-`include "legacy/usart_tx_legacy.svh"
-`include "spi/usart_tx_spi.svh"
-`include "util/usart_tx_sync.svh"
+logic sync_clock_rising_edge;
+
+logic baud_tick;
+logic sync_clock_tick;
+
 `include "util/usart_tx_util_pkg.svh"
+`include "async/usart_tx_async.svh"
+`include "util/usart_tx_sync.svh"
+`include "legacy/usart_tx_legacy.svh"
+//`include "spi/usart_tx_spi.svh"
+
+timer #(
+	.MAIN_CLOCK_FREQ(CLOCK_FREQ),
+	.TARGET_FREQ(BAUD_RATE)
+) baud_rate_ticker (
+	.clock_i(clock_i),
+	.reset_n_i(reset_n_i),
+	.enable_i(~ready_flag_o),
+	.tick_o(baud_tick)
+);
+
+timer #(
+	.MAIN_CLOCK_FREQ(CLOCK_FREQ),
+	.TARGET_FREQ(BAUD_RATE * 2)
+) sync_clock_ticker (
+	.clock_i(clock_i),
+	.reset_n_i(reset_n_i),
+	.enable_i(~ready_flag_o),
+	.tick_o(sync_clock_tick),
+	.previous_state_o(previous_usart_tx_clock)
+);
 
 always_comb begin
-	always_comb_defaults();
-	if (usart_tx_clock_o && !previous_usart_tx_clock) begin
-		sync_clock_rising_edge = 1;
-	end else begin
-		sync_clock_rising_edge = 0;
-	end 
+	sync_clock_rising_edge = is_rising_edge(
+		.old_value(sync_clock_rising_edge), 
+		.previous_state(previous_usart_tx_clock), 
+		.current_state(usart_tx_clock_o)
+		);
+
+	next_usart_state = usart_state;
+
 	case (TRANSMITTER_MODE)
 		ASYNCHRONOUS_UART: begin
-			async_mode_state_machine();
+			next_usart_state = async_mode_state_machine(
+				.bit_index(bit_index),
+				.data_bit_count(DATA_BIT_COUNT),
+				.current_state(usart_state),
+				.transmit_flag(transmit_flag_i),
+				.ready_flag(ready_flag_o),
+				.fast_trigger(start_fast_trigger)
+			);
 		end
 		LEGACY_SYNCHRONOUS: begin
 			legacy_sync_mode_state_machine();
@@ -69,77 +98,82 @@ end
 
 always_ff @(posedge clock_i) begin
 	// RESET CONDITION
-	set_clock_polarity_during_idle();
+	if (usart_state == FSM_IDLE) usart_tx_clock_o <= set_clock_polarity_during_state(usart_tx_clock_o, CLOCK_POLARITY);
 	if (!reset_n_i) begin
 		initialize_on_reset();
 	end else begin
 		if (module_enable_i) begin
-			synchronous_clock_driver();
+			latched_data_byte <= latch_data_on_state(
+				.old_data(latched_data_byte), 
+				.new_data(data_byte_i), 
+				.current_state(usart_state), 
+				.target_state(FSM_START)
+				);
+
+			//synchronous_clock_driver();
 			case (TRANSMITTER_MODE)
-				ASYNCHRONOUS_UART: begin
-				end
 				LEGACY_SYNCHRONOUS: begin
-					chip_enable_control();
+					legacy_sync_usart_branch();
 				end
 				SPI_MASTER_SYNCHRONOUS: begin
-					chip_enable_control();
 				end
 			endcase
 
 			if (!ready_flag_o) begin
-				if (baud_counter < CLOCKS_PER_BIT && start_fast_trigger != 1'd1) begin
-					baud_counter <= baud_counter + 1'd1;
-					if (bit_index == 0 && next_usart_state == FSM_DATA) latched_data_byte <= data_byte_i;
-					case (TRANSMITTER_MODE)
-						ASYNCHRONOUS_UART: begin
-							async_tx();
-						end
-						LEGACY_SYNCHRONOUS: begin
-							legacy_synchronous_tx();
-						end
-						SPI_MASTER_SYNCHRONOUS: begin
-							spi_master_tx();
-						end
-					endcase
-
-				end else begin
-					baud_counter <= '0;
-					case (TRANSMITTER_MODE)
-						ASYNCHRONOUS_UART: begin
-							usart_state <= next_usart_state;
-							bit_index_handler();
-						end
-						LEGACY_SYNCHRONOUS: begin
-							if (usart_state <= FSM_START) usart_state = next_usart_state;		
-						end
-					endcase
-				end
+				// async uart
+				case (TRANSMITTER_MODE)
+					ASYNCHRONOUS_UART: begin
+						async_usart_branch();
+					end
+				endcase
 			end
 		end
 	end
 end
 
-// ALWAYS_COMB FUNCTIONS
-
-function void always_comb_defaults();
-	start_fast_trigger = '0;
-	ready_flag_o = '0;
-	next_usart_state = usart_state;
-	enable_sync_clock_driver = 0;
-endfunction
-
 // ALWAYS_FF FUNCTIONS
 
-function void initialize_on_reset();
+function automatic void initialize_on_reset();
 	usart_state <= FSM_IDLE;
 	bit_index <= '0;
-	baud_counter <= '0;
 	latched_data_byte <= '0;
 	usart_tx_o <= 1'd1;
-	sync_clock_switched <= '0;
 	usart_tx_clock_o <= '0;
-	clock_counter <= '0;
 	chip_select_registers_o <= '{default:1'd1};
+endfunction
+
+function automatic void async_usart_branch();
+	if (!baud_tick && start_fast_trigger != 1'd1) begin
+		async_tx();
+	end	else begin
+		usart_state <= state_transition(
+			.new_state(next_usart_state)
+		);
+		bit_index <= bit_index_handler(
+			.old_bit_index(bit_index), 
+			.limit(DATA_BIT_COUNT), 
+			.current_state(usart_state), 
+			.target_state(FSM_DATA)
+		);
+
+	end
+endfunction
+
+function automatic void legacy_sync_usart_branch();
+	if (!sync_clock_tick) begin
+		legacy_synchronous_tx();
+	end else begin
+		usart_state <= state_transition(next_usart_state);
+		bit_index <= bit_index_handler(
+			.old_bit_index(bit_index),
+			.limit(DATA_BIT_COUNT), 
+			.current_state(usart_state), 
+			.target_state(FSM_DATA)
+			);
+	end
+endfunction
+
+function automatic void spi_master_usart_branch();
 endfunction
 
 endmodule
